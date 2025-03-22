@@ -28,7 +28,7 @@ class FirstAdvantageAutomation:
 
     def load_sheets(self):
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name("email-automation-ai-443901-271df1a1edc1.json", scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_name("service-account.json", scope)
         client = gspread.authorize(creds)
         spreadsheet = client.open_by_url(self.sheet_url)
         return {
