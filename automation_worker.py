@@ -17,6 +17,8 @@ class FirstAdvantageAutomation:
         self.total = 0
         self.thread = None
         self.status = "Stopped"
+    def set_status(self, status_text):
+        self.status = status_text
 
     def load_sheet(self):
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
