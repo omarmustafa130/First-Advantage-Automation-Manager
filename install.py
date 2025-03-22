@@ -7,7 +7,8 @@ REQUIREMENTS = [
     "playwright",
     "gspread",
     "oauth2client",
-    "apscheduler"
+    "apscheduler",
+    "pytz"
 ]
 
 def run(command):
