@@ -8,13 +8,15 @@ app = Flask(__name__)
 
 @app.route('/')
 def index():
+    status_data = automation_instance.get_status()
     return render_template("index.html",
-        client_id=automation_instance.CLIENT_ID,
-        user_id=automation_instance.USER_ID,
-        processed=automation_instance.processed,
-        total=automation_instance.total,
-        status=automation_instance.get_status()
+        client_id=status_data["client_id"],
+        user_id=status_data["user_id"],
+        processed=status_data["applicants_processed"],
+        total=status_data["applicants_total"],
+        status=status_data
     )
+
 
 @app.route('/update', methods=['POST'])
 def update():
@@ -47,22 +49,33 @@ def stop_now():
 
 @app.route('/status')
 def status():
-    remaining = max(automation_instance.total - automation_instance.processed, 0)
+    status_data = automation_instance.get_status()
+    remaining = max(status_data["applicants_total"] - status_data["applicants_processed"], 0)
+
     estimated_seconds = remaining * 75
     eta_minutes = estimated_seconds // 60
     eta_seconds = estimated_seconds % 60
     eta = f"{int(eta_minutes)}m {int(eta_seconds)}s" if remaining else "0m 0s"
 
     status_data = automation_instance.get_status()
+
+    eta_applicants = f"{(max(status_data['applicants_total'] - status_data['applicants_processed'], 0) * 75) // 60}m"
+    eta_pending = f"{(max(status_data['pending_total'] - status_data['pending_processed'], 0) * 75) // 60}m"
+
     return jsonify({
-        "processed": status_data["processed"],
-        "total": status_data["total"],
         "client_id": status_data["client_id"],
         "user_id": status_data["user_id"],
         "sheet_url": status_data["sheet_url"],
         "status": status_data["status"],
-        "eta": eta
+        "applicants_processed": status_data["applicants_processed"],
+        "applicants_total": status_data["applicants_total"],
+        "pending_processed": status_data["pending_processed"],
+        "pending_total": status_data["pending_total"],
+        "orders_placed": status_data["orders_placed"],
+        "eta_applicants": eta_applicants,
+        "eta_pending": eta_pending
     })
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5001)

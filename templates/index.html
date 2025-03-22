@@ -36,8 +36,10 @@
             <hr class="my-2">
             <strong>Sheet:</strong> ${data.sheet_url || 'N/A'}<br>
             <hr class="my-2">
-            <strong>Processed:</strong> ${data.processed || 0} / ${data.total || 0} 
-            <span class="ms-3"> Estimated Time: ${data.eta}</span>
+            <strong>Applicants Processed:</strong> ${data.applicants_processed || 0} / ${data.applicants_total || 0}
+            <span class="ms-3">Estimated Time: ${data.eta_applicants}</span><br>
+            <strong>Orders Placed (Pending Review):</strong> ${data.pending_processed || 0} / ${data.pending_total || 0}
+            <span class="ms-3">Estimated Time: ${data.eta_pending}</span>
           `;
         })
         .catch(err => {
