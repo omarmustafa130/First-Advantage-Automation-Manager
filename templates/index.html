@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FADV Automation Manager</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    function updateStatus() {
+      fetch('/status')
+        .then(res => res.json())
+        .then(data => {
+          const statusBox = document.getElementById('statusText');
+  
+          // Set color class based on status
+          let alertClass = "alert-info";
+          const status = (data.status || "").toLowerCase();
+  
+          if (status === "running") {
+            alertClass = "alert-success";  // light green
+          } else if (status === "stopped") {
+            alertClass = "alert-danger";   // light red
+          } else if (status.startsWith("scheduled")) {
+            alertClass = "alert-primary";  // light blue
+          }
+  
+          // Replace all alert classes
+          statusBox.className = "alert " + alertClass;
+  
+          // Update content
+          statusBox.innerHTML = `
+            <strong>Status:</strong> ${data.status || 'N/A'}<br>
+            <hr class="my-2">
+            <strong>Client ID:</strong> ${data.client_id || 'N/A'}<br>
+            <hr class="my-2">
+            <strong>User ID:</strong> ${data.user_id || 'N/A'}<br>
+            <hr class="my-2">
+            <strong>Sheet:</strong> ${data.sheet_url || 'N/A'}<br>
+            <hr class="my-2">
+            <strong>Processed:</strong> ${data.processed || 0} / ${data.total || 0} 
+            <span class="ms-3"> Estimated Time: ${data.eta}</span>
+          `;
+        })
+        .catch(err => {
+          document.getElementById('statusText').innerText = "Failed to fetch status.";
+          document.getElementById('statusText').className = "alert alert-danger";
+        });
+    }
+  
+    setInterval(updateStatus, 5000);
+    window.onload = updateStatus;
+  </script>
+</head>
+<body class="bg-light">
+  <div class="container py-4">
+    <h2 class="mb-4 text-center">First Advantage Automation Manager</h2>
+
+    <!-- Status Panel -->
+    <div id="statusText" class="alert" role="alert">
+      Loading status...
+    </div>
+
+    <!-- Start / Stop -->
+    <div class="d-flex justify-content-center gap-2 mb-4">
+      <form method="post" action="/start">
+        <button class="btn btn-success">Start Now</button>
+      </form>
+      <form method="post" action="/stop">
+        <button class="btn btn-danger">Stop</button>
+      </form>
+    </div>
+
+    <!-- Schedule -->
+    <div class="card mb-4">
+      <div class="card-header">Schedule Start</div>
+      <div class="card-body">
+        <form method="post" action="/schedule">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="mode" id="once" value="once" checked onchange="handleScheduleModeChange()">
+            <label class="form-check-label" for="once">Once</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="mode" id="daily" value="daily" onchange="handleScheduleModeChange()">
+            <label class="form-check-label" for="daily">Daily</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="mode" id="weekly" value="weekly" onchange="handleScheduleModeChange()">
+            <label class="form-check-label" for="weekly">Weekly</label>
+          </div>
+
+          <div id="dateField" class="mt-3">
+            <label class="form-label">Date & Time (for Once)</label>
+            <input type="datetime-local" name="datetime" class="form-control w-50">
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label">Time</label>
+            <input type="time" name="time" class="form-control w-25">
+          </div>
+
+          <div id="weekdayField" class="mt-3" style="display: none;">
+            <label class="form-label">Day (only for Weekly)</label>
+            <select class="form-select w-25" name="weekday">
+              <option value="mon">Monday</option>
+              <option value="tue">Tuesday</option>
+              <option value="wed">Wednesday</option>
+              <option value="thu">Thursday</option>
+              <option value="fri">Friday</option>
+              <option value="sat">Saturday</option>
+              <option value="sun">Sunday</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary mt-3">Schedule</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Update Credentials -->
+    <div class="card mb-4">
+      <div class="card-header">Update Credentials</div>
+      <div class="card-body">
+        <form method="post" action="/update">
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Client ID</label>
+              <input type="text" name="client_id" value="{{ client_id }}" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">User ID</label>
+              <input type="text" name="user_id" value="{{ user_id }}" class="form-control" required>
+            </div>
+          </div>
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Security Question Answer</label>
+              <input type="text" name="security_question" class="form-control" required>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Google Sheet URL</label>
+            <input type="url" name="sheet_url" class="form-control" placeholder="Paste your public sheet URL here" required>
+          </div>
+          <button class="btn btn-primary">Update Credentials</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
