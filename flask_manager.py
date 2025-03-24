@@ -31,7 +31,7 @@ def update():
 
 @app.route('/start', methods=['POST'])
 def start_now():
-    gmt5 = pytz.timezone("Etc/GMT+5")  # GMT-5 (Eastern Time)
+    gmt5 = pytz.timezone("US/Eastern")  # GMT-5 (Eastern Time)
     now = datetime.datetime.now(gmt5)
     if 8 <= now.hour < 20:
         automation_instance.run()
