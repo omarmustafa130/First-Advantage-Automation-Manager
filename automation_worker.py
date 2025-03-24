@@ -3,7 +3,8 @@ import time
 import threading
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-
+import datetime
+import pytz
 
 class FirstAdvantageAutomation:
     def __init__(self):
@@ -37,12 +38,39 @@ class FirstAdvantageAutomation:
         }
 
     def get_status(self):
+        try:
+            sheets = self.load_sheets()
+            applicants_sheet = sheets["Applicants"]
+            applicants_data = applicants_sheet.get_all_records()
+            applicants_processed = sum(
+                1 for row in applicants_data
+                if str(row.get("Status", "")).strip().lower() == "completed"
+            )
+            applicants_total = len(applicants_data)
+
+            pending_sheet = sheets["Pending Review"]
+            pending_data = pending_sheet.get_all_records()
+            pending_processed = sum(
+                1 for row in pending_data
+                if str(row.get("Status", "")).strip().lower() == "completed"
+            )
+            pending_total = len(pending_data)
+            orders_placed = pending_processed  # Adjust if orders_placed is tracked differently
+
+        except Exception as e:
+            print(f"Error loading sheets for status: {e}")
+            applicants_processed = 0
+            applicants_total = 0
+            pending_processed = 0
+            pending_total = 0
+            orders_placed = 0
+
         return {
-            "applicants_processed": self.applicants_processed,
-            "applicants_total": self.applicants_total,
-            "pending_processed": self.pending_processed,
-            "pending_total": self.pending_total,
-            "orders_placed": self.orders_placed,
+            "applicants_processed": applicants_processed,
+            "applicants_total": applicants_total,
+            "pending_processed": pending_processed,
+            "pending_total": pending_total,
+            "orders_placed": orders_placed,
             "client_id": self.CLIENT_ID,
             "user_id": self.USER_ID,
             "sheet_url": self.sheet_url,
@@ -77,6 +105,12 @@ class FirstAdvantageAutomation:
     def process(self):
         while self.running:
             try:
+                est = pytz.timezone('US/Eastern')
+                current_time = datetime.datetime.now(est)
+                if not (8 <= current_time.hour < 20):
+                    self.set_status("Sleeping until 8am EST")
+                    self.running = False
+                    break
                 sheets = self.load_sheets()
 
                 # Step 1: Process Applicants tab first
