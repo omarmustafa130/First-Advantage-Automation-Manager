@@ -16,68 +16,53 @@ class FirstAdvantageAutomation:
         self.running = False
         self.thread = None
         self.status = "Stopped"
-
-        # Add these:
-        self.applicants_processed = 0
+        
+        # In-memory counters
         self.applicants_total = 0
-        self.orders_placed = 0
+        self.applicants_processed = 0
         self.pending_total = 0
-        self.pending_processed = 0 
+        self.pending_processed = 0
+        self.orders_placed = 0
 
     def set_status(self, status_text):
         self.status = status_text
 
     def load_sheets(self):
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name("service-account.json", scope)
-        client = gspread.authorize(creds)
-        spreadsheet = client.open_by_url(self.sheet_url)
-        return {
-            "Applicants": spreadsheet.worksheet("Applicants"),
-            "Pending Review": spreadsheet.worksheet("Pending Review")
-        }
+        """
+        This method just returns the 'Applicants' and 'Pending Review' worksheets,
+        with a small retry in case of transient errors.
+        """
+        max_retries = 3
+        for _ in range(max_retries):
+            try:
+                scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+                creds = ServiceAccountCredentials.from_json_keyfile_name("service-account.json", scope)
+                client = gspread.authorize(creds)
+                spreadsheet = client.open_by_url(self.sheet_url)
+                return {
+                    "Applicants": spreadsheet.worksheet("Applicants"),
+                    "Pending Review": spreadsheet.worksheet("Pending Review")
+                }
+            except:
+                time.sleep(2)
+        raise Exception("Failed to load sheets after retries.")
 
     def get_status(self):
-        try:
-            sheets = self.load_sheets()
-            applicants_sheet = sheets["Applicants"]
-            applicants_data = applicants_sheet.get_all_records()
-            applicants_processed = sum(
-                1 for row in applicants_data
-                if str(row.get("Status", "")).strip().lower() == "completed"
-            )
-            applicants_total = len(applicants_data)
-
-            pending_sheet = sheets["Pending Review"]
-            pending_data = pending_sheet.get_all_records()
-            pending_processed = sum(
-                1 for row in pending_data
-                if str(row.get("Status", "")).strip().lower() == "completed"
-            )
-            pending_total = len(pending_data)
-            orders_placed = pending_processed  # Adjust if orders_placed is tracked differently
-
-        except Exception as e:
-            print(f"Error loading sheets for status: {e}")
-            applicants_processed = 0
-            applicants_total = 0
-            pending_processed = 0
-            pending_total = 0
-            orders_placed = 0
-
+        """
+        Returns the last known counters (in memory) without re-loading the sheet.
+        This keeps /status calls fast and stable.
+        """
         return {
-            "applicants_processed": applicants_processed,
-            "applicants_total": applicants_total,
-            "pending_processed": pending_processed,
-            "pending_total": pending_total,
-            "orders_placed": orders_placed,
+            "applicants_total": self.applicants_total,
+            "applicants_processed": self.applicants_processed,
+            "pending_total": self.pending_total,
+            "pending_processed": self.pending_processed,
+            "orders_placed": self.orders_placed,
             "client_id": self.CLIENT_ID,
             "user_id": self.USER_ID,
             "sheet_url": self.sheet_url,
             "status": self.status
         }
-
-
 
     def update_credentials(self, client_id, user_id, password, sec_question, sheet_url):
         self.CLIENT_ID = client_id
@@ -92,6 +77,32 @@ class FirstAdvantageAutomation:
             return
         self.running = True
         self.status = "Running"
+        
+        # On start, do an initial load to set counters
+        try:
+            sheets = self.load_sheets()
+            # Applicants
+            applicants_data = sheets["Applicants"].get_all_records()
+            self.applicants_total = len(applicants_data)
+            self.applicants_processed = sum(
+                1 for row in applicants_data
+                if str(row.get("Status", "")).strip().lower() == "completed"
+            )
+            # Pending
+            pending_data = sheets["Pending Review"].get_all_records()
+            self.pending_total = len(pending_data)
+            self.pending_processed = sum(
+                1 for row in pending_data
+                if str(row.get("Status", "")).strip().lower() == "completed"
+            )
+            self.orders_placed = sum(
+                1 for row in pending_data
+                if str(row.get("OrderStatus", "")).strip().lower() == "placed"
+            )
+        except Exception as e:
+            print("Error loading initial sheet counts:", e)
+
+        # Start processing in a background thread
         self.thread = threading.Thread(target=self.process)
         self.thread.start()
 
@@ -111,63 +122,69 @@ class FirstAdvantageAutomation:
                     self.set_status("Sleeping until 8am EST")
                     self.running = False
                     break
+
                 sheets = self.load_sheets()
 
-                # Step 1: Process Applicants tab first
+                # Step 1: Process Applicants
                 applicants_sheet = sheets["Applicants"]
                 applicants_data = applicants_sheet.get_all_records()
                 applicants_headers = applicants_sheet.row_values(1)
-                applicants_status_col = applicants_headers.index("Status") + 1
+                status_col_app = applicants_headers.index("Status") + 1
 
+                # Refresh totals
+                self.applicants_total = len(applicants_data)
+                self.applicants_processed = sum(
+                    1 for row in applicants_data
+                    if str(row.get("Status", "")).strip().lower() == "completed"
+                )
+
+                # Find rows not completed
                 applicants_to_process = [
                     (i, row) for i, row in enumerate(applicants_data)
                     if str(row.get("Status", "")).strip().lower() != "completed"
                 ]
-
                 if applicants_to_process:
-                    self.applicants_total = len(applicants_data)
-                    self.applicants_processed = sum(
-                        1 for row in applicants_data
-                        if str(row.get("Status", "")).strip().lower() == "completed"
-                    )
-
                     for index, row in applicants_to_process:
                         if not self.running:
                             break
-                        if self.process_row(index, row, is_pending_review=False):
-                            applicants_sheet.update_cell(index + 2, applicants_status_col, "Completed")
+                        success = self.process_row(index, row, is_pending_review=False)
+                        if success:
+                            applicants_sheet.update_cell(index + 2, status_col_app, "Completed")
                             self.applicants_processed += 1
-
-                        time.sleep(2)
+                        time.sleep(3)
                 else:
-                    # Step 2: Try Pending Review tab
+                    # Step 2: Try Pending Review
                     pending_sheet = sheets["Pending Review"]
                     pending_data = pending_sheet.get_all_records()
                     pending_headers = pending_sheet.row_values(1)
-                    pending_status_col = pending_headers.index("Status") + 1
-
-                    pending_to_process = [
-                        (i, row) for i, row in enumerate(pending_data)
-                        if str(row.get("Status", "")).strip().lower() == "new"
-                    ]
+                    status_col_pending = pending_headers.index("Status") + 1
 
                     self.pending_total = len(pending_data)
                     self.pending_processed = sum(
                         1 for row in pending_data
                         if str(row.get("Status", "")).strip().lower() == "completed"
                     )
-                    for index, row in pending_to_process:
-                        if not self.running:
-                            break
-                        if self.process_row(index, row, is_pending_review=True):
-                            pending_sheet.update_cell(index + 2, pending_status_col, "Completed")
-                            self.pending_processed += 1
-                            self.orders_placed += 1
-                        time.sleep(2)
 
+                    pending_to_process = [
+                        (i, row) for i, row in enumerate(pending_data)
+                        if str(row.get("Status", "")).strip().lower() == "new"
+                    ]
+                    if pending_to_process:
+                        for index, row in pending_to_process:
+                            if not self.running:
+                                break
+                            success = self.process_row(index, row, is_pending_review=True)
+                            if success:
+                                pending_sheet.update_cell(index + 2, status_col_pending, "Completed")
+                                self.pending_processed += 1
+                                # Possibly track 'OrderStatus' too?
+                                # If you want to mark row["OrderStatus"] = "Placed"
+                                # you'd do something similar to update_cell
+                            time.sleep(3)
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error in process loop: {e}")
 
+            # Wait 10s before next check
             time.sleep(10)
 
     def process_row(self, index, row, is_pending_review=False):
@@ -209,12 +226,12 @@ class FirstAdvantageAutomation:
                 except:
                     page.evaluate("document.getElementById('agreeBtn').click()")
 
+                # Wait for main menu to load
                 time.sleep(30)
-                
                 page.locator("div#EE_MENU_PROFILE_ADVANTAGE > table > tbody > tr:first-child a").click()
 
                 if not is_pending_review:
-                    # -------------------- Applicants Flow --------------------
+                    # Applicants flow
                     page.locator("div#EE_MENU_PROFILE_ADVANTAGE_NEW_SUBJECT span", has_text="New Subject").wait_for(state="visible")
                     page.locator("div#EE_MENU_PROFILE_ADVANTAGE_NEW_SUBJECT span", has_text="New Subject").click()
                     time.sleep(20)
@@ -225,14 +242,18 @@ class FirstAdvantageAutomation:
                     time.sleep(25)
                     page.locator("select#Order\\.Info\\.RefID3").select_option(str(csp_id))
                     time.sleep(3)
+
                     package_options = page.locator("select#CDC_NEW_SUBJECT_PACKAGE_LABEL option").all_text_contents()
                     for option in package_options:
                         if package_text in option:
-                            value = page.locator(f"select#CDC_NEW_SUBJECT_PACKAGE_LABEL option", has_text=option).get_attribute("value")
+                            value = page.locator(
+                                "select#CDC_NEW_SUBJECT_PACKAGE_LABEL option", has_text=option
+                            ).get_attribute("value")
                             page.locator("select#CDC_NEW_SUBJECT_PACKAGE_LABEL").select_option(value)
                             break
                     time.sleep(3)
                     page.locator("select#Company\\ ID").select_option(label=company_id)
+
                     location_map = {
                         "wilson": "00256 - WILSON, NC",
                         "new hill": "00250 - NEW HILL, NC",
@@ -247,7 +268,7 @@ class FirstAdvantageAutomation:
                     page.get_by_text("Send", exact=True).click()
                     time.sleep(10)
                 else:
-                    # -------------------- Pending Review Flow --------------------
+                    # Pending Review flow
                     page.get_by_text("Find Subject", exact=True).click()
                     page.locator("input#CDC_SEARCH_SUBJECT_EMAIL_ADDRESS_LBL").fill(email)
                     page.locator("select#CDC_SEARCH_SUBJECT_PROFILE_STATUS_LBL").select_option(label="Pending For Review")
@@ -264,8 +285,6 @@ class FirstAdvantageAutomation:
                     time.sleep(10)
 
                 browser.close()
-                if not is_pending_review:
-                    self.orders_placed += 1
                 return True
         except Exception as e:
             print(f"Row {index} failed: {e}")
@@ -274,6 +293,5 @@ class FirstAdvantageAutomation:
     def fill_shadow_input(self, component, value, frame):
         shadow_input = frame.locator(component).evaluate_handle("el => el.shadowRoot.querySelector('input')")
         shadow_input.as_element().fill(value)
-
 
 automation_instance = FirstAdvantageAutomation()
