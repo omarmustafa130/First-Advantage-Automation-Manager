@@ -1,8 +1,8 @@
 from flask import Flask, render_template, request, redirect, jsonify
 from automation_worker import automation_instance
-import datetime
 import pytz
 import threading
+from datetime import datetime, timedelta, time
 
 app = Flask(__name__)
 
@@ -31,27 +31,48 @@ def update():
 
 @app.route('/start', methods=['POST'])
 def start_now():
-    gmt5 = pytz.timezone("US/Eastern")  # GMT-5 (Eastern Time)
-    now = datetime.datetime.now(gmt5)
+    est = pytz.timezone('US/Eastern')
+    now = datetime.now(est)
+    
     if 8 <= now.hour < 20:
         automation_instance.run()
     else:
-        automation_instance.set_status("Sleeping until 8am GMT-5")
-        wait_seconds = ((24 + 8 - now.hour) % 24) * 3600 - now.minute * 60 - now.second
+        # Remove this line: automation_instance.set_status("Sleeping until 8am GMT-5")
+        automation_instance.stop()  # Ensure any existing process stops
+        automation_instance.set_status("Sleeping until 8am EST")
+        
+        # Calculate time until next 8am
+        next_run = est.localize(datetime.combine(
+            now.date() + timedelta(days=1 if now.hour >= 20 else 0),
+            time(8, 0)
+        ))
+        wait_seconds = (next_run - now).total_seconds()
+        
         threading.Timer(wait_seconds, automation_instance.run).start()
+    
     return redirect("/")
 
+
+@app.errorhandler(500)
+def internal_error(error):
+    return "Internal server error", 500
 
 @app.route('/stop', methods=['POST'])
 def stop_now():
     automation_instance.stop()
     return redirect("/")
 
+@app.route('/force-start', methods=['POST'])
+def force_start():
+    automation_instance.run(force=True)
+    return redirect("/")
+
 @app.route('/status')
 def status():
     status_data = automation_instance.get_status()
     remaining = max(status_data["applicants_total"] - status_data["applicants_processed"], 0)
-
+    est = pytz.timezone('US/Eastern')
+    current_time = datetime.now(est).strftime("%Y-%m-%d %H:%M:%S ET")
     estimated_seconds = remaining * 75
     eta_minutes = estimated_seconds // 60
     eta_seconds = estimated_seconds % 60
@@ -63,6 +84,7 @@ def status():
     eta_pending = f"{(max(status_data['pending_total'] - status_data['pending_processed'], 0) * 75) // 60}m"
 
     return jsonify({
+        "current_time": current_time,
         "client_id": status_data["client_id"],
         "user_id": status_data["user_id"],
         "sheet_url": status_data["sheet_url"],
