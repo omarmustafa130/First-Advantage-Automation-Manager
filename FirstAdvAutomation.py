@@ -9,7 +9,7 @@ def fill_shadow_input(component, value, frame):
 
 def main(index, row, CLIENT_ID, USER_ID, PASSWORD, SEC_QUESTION, first_name, last_name, email, company_id, location, position_type, csp_id, package_text):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
         page.goto("https://enterprise.fadv.com/")
@@ -63,7 +63,6 @@ def main(index, row, CLIENT_ID, USER_ID, PASSWORD, SEC_QUESTION, first_name, las
         page.locator("input#CDC_NEW_SUBJECT_LAST_NAME").fill(last_name)
         page.locator("input#CDC_NEW_SUBJECT_EMAIL_ADDRESS").fill(email)
 
-        page.locator("input#gwt-uid-685").check()
         time.sleep(25)
         # Select CSP ID from dropdown
         page.locator("select#Order\\.Info\\.RefID3").select_option(str(csp_id))
